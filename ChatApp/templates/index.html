@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Real-time chat application for employee communication">
+    <meta name="theme-color" content="#ffffff">
+    <title>Real-time Chat</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="offline-indicator" id="offlineIndicator">
+        You are currently offline. Messages will be sent when you reconnect.
+    </div>
+
+    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+        <div class="loading-spinner"></div>
+        <p>Loading chat...</p>
+    </div>
+
+    <!-- Login is now a dedicated page. Remove legacy user selection modal. -->
+
+    <div class="container-fluid" id="chatContainer" style="display: none;">
+        <div class="chat-container">
+            <button class="btn btn-primary d-md-none position-fixed" id="sidebarToggle" style="top: 10px; left: 10px; z-index: 1060;">
+                <i class="fas fa-bars"></i>
+            </button>
+
+            <div class="col-md-3 online-users-container">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="m-0 d-flex align-items-center">
+                            <img src="{{ url_for('static', filename='images/ardurtech.png') }}" alt="ArdurTech" style="height: 28px; width: auto; display: inline-block;"/>
+                        </h5>
+                        <div class="d-flex align-items-center">
+                            <span id="currentUser" class="badge bg-primary "></span>
+                            <button class="btn btn-sm btn-outline-secondary" id="refreshUsers" data-shortcut="R">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Toggle Button Group -->
+                    <div class="toggle-chat-type d-flex justify-content-center align-items-center py-2 border-bottom">
+                        <div class="btn-group w-100" role="group" aria-label="Chat Type Toggle">
+                            <button type="button" class="btn btn-toggle-chat active" id="toggleDirectChat" title="Direct Chat">
+                                <i class="fas fa-user-friends"></i>
+                            </button>
+                            <button type="button" class="btn btn-toggle-chat" id="toggleGroupChat" title="Group Chat">
+                                <i class="fas fa-users"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="card-body p-0">
+                        <div class="search-box p-2" id="directChatSearchBox">
+                            <input type="text" class="form-control" id="userSearch" placeholder="Search employees..." aria-label="Search employees">
+                        </div>
+                        <ul id="active-users-list" class="list-group list-group-flush" role="list">
+                            {% for employee in employees %}
+                            <li class="list-group-item user-item" data-user-id="{{ employee.employee_id }}" 
+                                data-is-online="false" data-last-activity="0" role="listitem" tabindex="0" {% if employee.employee_id == current_user.emp_id %}data-is-self="true" aria-current="true"{% endif %}>
+                                <span class="user-status offline" aria-label="User status"></span>
+                                <div class="user-info">
+                                    <div class="user-name d-flex justify-content-between align-items-center">
+                                        <span class="user-name-text">{% if employee.employee_id == current_user.emp_id %}(You) {% endif %}{{ employee.name }}</span>
+                                        <span class="unread-count badge bg-danger ms-2" style="display: none;">0</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div class="user-role text-muted">{{ employee.role }}</div>
+                                        <!-- Pin button injected by JS to avoid duplication -->
+                                    </div>
+                                </div>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        <!-- Group Chat List (hidden by default, toggled by JS) -->
+                        <div class="search-box p-2 d-none" id="groupChatSearchBox">
+                            <input type="text" class="form-control" id="groupSearch" placeholder="Search groups..." aria-label="Search groups">
+                        </div>
+                        <ul id="group-list" class="list-group list-group-flush d-none" role="list">
+                            <!-- Populated by JS -->
+                        </ul>
+                        <div class="d-flex justify-content-end align-items-center px-2 py-2 d-none" id="groupCreateBtnRow">
+                            <button class="btn btn-sm btn-primary" id="createGroupBtn" title="Create Group"><i class="fas fa-plus"></i> New Group</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-9 chat-area">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="d-flex justify-content-between align-items-center w-100">
+                            <div class="d-flex flex-column">
+                                <h5 id="chatWith">Select an employee or group to start chat</h5>
+                                <div id="chatWithStatus" class="text-muted small"></div>
+                            </div>
+                             <div class="chat-actions d-flex align-items-center">
+                                <button class="btn btn-outline-secondary btn-sm" id="themeToggleBtn" title="Switch to dark theme" aria-label="Toggle theme" aria-pressed="false"><i class="fas fa-moon"></i></button>
+                                <!-- <button class="btn btn-outline-secondary btn-sm ms-2" id="clearChat" data-shortcut="Alt+C" title="Clear Chat"><i class="fas fa-trash-alt"></i></button> -->
+                                <button class="btn btn-outline-secondary btn-sm ms-2" id="pinnedMessagesBtn" title="View pinned messages"><i class="fas fa-thumbtack"></i></button>
+                                <button class="btn btn-outline-secondary btn-sm ms-2" id="searchMessagesBtn" title="Search messages"><i class="fas fa-search"></i></button>
+                                <button class="btn btn-outline-secondary btn-sm ms-2" id="scrollToBottom" data-shortcut="Alt+↓" title="Scroll to bottom"><i class="fas fa-arrow-down"></i></button>
+                                <button class="btn btn-outline-secondary btn-sm ms-2 d-none" id="manageGroupBtn" title="Manage Group Members"><i class="fas fa-users-cog"></i></button>
+                                 <button class="btn btn-outline-danger btn-sm ms-2" id="logoutBtn" title="Logout"><i class="fas fa-sign-out-alt"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body messages-container" id="messages" role="log" aria-live="polite">
+                        <div class="welcome-card modern text-center p-4" id="welcomeCard" role="region" aria-label="Welcome">
+                            <div class="welcome-decor"></div>
+                            <div class="welcome-icon pulse">
+                                <i class="fas fa-comments"></i>
+                            </div>
+                            <div class="brand-row d-flex justify-content-center align-items-center mb-2">
+                                <img class="brand-logo" src="{{ url_for('static', filename='images/ardurtech.png') }}" alt="ArdurTech" />
+                            </div>
+                            <h3 class="welcome-title m-0">Welcome back</h3>
+                            <p class="welcome-greeting fs-5 fw-semibold mt-1">Hello, {{ current_user.name }}! 👋</p>
+                            <p class="welcome-subtitle">Connect with your colleagues instantly</p>
+                            <div class="welcome-actions d-flex gap-2 justify-content-center mt-2">
+                                <button type="button" id="startChatBtn" class="btn btn-primary">
+                                    <i class="fas fa-paper-plane me-2"></i>Start Chat
+                                </button>
+                                <button type="button" id="viewShortcutsBtn" class="btn btn-outline-secondary">
+                                    <i class="fas fa-keyboard me-2"></i>Shortcuts
+                                </button>
+                            </div>
+                            <div class="welcome-features mt-4">
+                                <div class="feature-card">
+                                    <div class="feature-icon bg-primary-light">
+                                        <i class="fas fa-comment-dots text-primary"></i>
+                                    </div>
+                                    <h5>Real-time Messaging</h5>
+                                    <p>Chat instantly with your team members</p>
+                                </div>
+                                <div class="feature-card">
+                                    <div class="feature-icon bg-success-light">
+                                        <i class="fas fa-users text-success"></i>
+                                    </div>
+                                    <h5>Group Chats</h5>
+                                    <p>Collaborate with multiple team members</p>
+                                </div>
+                                <div class="feature-card">
+                                    <div class="feature-icon bg-warning-light">
+                                        <i class="fas fa-paperclip text-warning"></i>
+                                    </div>
+                                    <h5>File Sharing</h5>
+                                    <p>Share images and files easily</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Update virtual scroll container structure -->
+                        <div class="virtual-scroll-container">
+                            <div class="virtual-scroll-content" id="virtualScrollContent">
+                                <!-- Messages will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card-footer">
+                        <div id="reply-preview" class="reply-preview d-none"></div>
+                        <div id="image-preview-container"></div>
+                        <div class="input-group">
+                            <input type="file" class="d-none" id="image-upload" multiple accept="image/jpeg,image/png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Upload file">
+                            <button class="btn btn-outline-secondary" type="button" id="upload-btn" data-shortcut="Alt+U" aria-label="Upload file">
+                                <i class="fas fa-paperclip"></i>
+                            </button>
+                            <button class="btn btn-icon" type="button" id="emoji-btn" data-shortcut="Alt+E" aria-label="Open emoji picker">
+                                <i class="fas fa-smile emoji-icon"></i>
+                            </button>
+                            <input type="text" id="message-input" class="form-control flex-grow-1" placeholder="Type your message..." aria-label="Type your message" disabled>
+                            <button class="btn btn-primary" type="button" id="send-btn" data-shortcut="Enter" disabled>Send</button>
+                        </div>
+                        <div class="emoji-picker-container d-none" id="emoji-picker" role="dialog" aria-label="Emoji picker">
+                            <div class="emoji-picker-header">
+                              <span>Emoji Picker</span>
+                              <button class="btn-close-emoji" aria-label="Close emoji picker">
+                                <i class="fas fa-times"></i>
+                              </button>
+                            </div>
+                            <!-- <div class="emoji-picker-search">
+                              <input type="text" placeholder="Search emojis..." class="emoji-search-input">
+                            </div> -->
+                            <div class="emoji-categories">
+                              <button class="emoji-category-btn active" data-category="smileys"><i class="fas fa-smile"></i></button>
+                              <button class="emoji-category-btn" data-category="people"><i class="fas fa-user"></i></button>
+                              <button class="emoji-category-btn" data-category="nature"><i class="fas fa-leaf"></i></button>
+                              <button class="emoji-category-btn" data-category="food"><i class="fas fa-utensils"></i></button>
+                              <button class="emoji-category-btn" data-category="activities"><i class="fas fa-futbol"></i></button>
+                              <button class="emoji-category-btn" data-category="objects"><i class="fas fa-lightbulb"></i></button>
+                              <button class="emoji-category-btn" data-category="symbols"><i class="fas fa-heart"></i></button>
+                              <button class="emoji-category-btn" data-category="flags"><i class="fas fa-flag"></i></button>
+                            </div>
+                            <div class="emoji-grid">
+                              <!-- Emojis will be populated here by JS -->
+                            </div>
+                          </div>
+                        <div class="keyboard-shortcut-hint mt-3 text-center">
+                            <span class="shortcut-icon" tabindex="0" data-bs-toggle="modal" data-bs-target="#shortcutsModal" title="View keyboard shortcuts">
+                                <i class="fas fa-keyboard"></i> <span class="ms-1">View Keyboard Shortcuts</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GROUP CREATE MODAL -->
+    <div class="modal fade" id="createGroupModal" tabindex="-1" aria-labelledby="createGroupModalLabel">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createGroupModalLabel">Create Group</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createGroupForm">
+                        <div class="mb-3">
+                            <label for="groupName" class="form-label">Group Name</label>
+                            <input type="text" class="form-control" id="groupName" required>
+                            <div class="invalid-feedback" id="groupNameFeedback">Group name already exists</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Add Members</label>
+                            <div class="group-members-search">
+                                <input type="text" class="form-control" id="groupMemberSearch" placeholder="Search employees..." aria-label="Search employees">
+                            </div>
+                            <!-- Select All option for Create Group -->
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="selectAllCreateMembers">
+                                <label class="form-check-label" for="selectAllCreateMembers">
+                                    Select All
+                                </label>
+                            </div>
+                            <div class="group-members-container" id="groupMembersSelectContainer">
+                                <div id="groupMembersSelect">
+                                    <!-- Populated by JS: checkboxes for employees -->
+                                </div>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Create Group</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GROUP MEMBER MANAGEMENT MODAL -->
+    <div class="modal fade" id="manageGroupModal" tabindex="-1" aria-labelledby="manageGroupModalLabel">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="manageGroupModalLabel">Manage Group Members</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Search box for current members -->
+                    <div class="search-box mb-3">
+                        <input type="text" class="form-control" id="searchCurrentMembers" placeholder="Search current members..." aria-label="Search current members">
+                    </div>
+                    
+                    <div id="manageGroupMembersList">
+                        <!-- Populated by JS: list of members with remove buttons -->
+                    </div>
+                    <hr>
+                    <div class="mb-2">
+                        <label class="form-label">Add New Member</label>
+                        
+                        <!-- Search box for adding new members -->
+                        <div class="search-box mb-2">
+                            <input type="text" class="form-control" id="searchNewMembers" placeholder="Search employees to add..." aria-label="Search employees to add">
+                        </div>
+                        
+                        <!-- Select All option -->
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="selectAllMembers">
+                            <label class="form-check-label" for="selectAllMembers">
+                                Select All
+                            </label>
+                        </div>
+                        
+                        <div id="addGroupMemberSelect">
+                            <!-- Populated by JS: checkboxes for employees not in group -->
+                        </div>
+                        <button class="btn btn-success mt-2" id="addGroupMemberBtn">Add Selected</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GROUP MEMBERS INFO MODAL -->
+    <div class="modal fade" id="groupMembersModal" tabindex="-1" aria-labelledby="groupMembersModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="groupMembersModalLabel">Group Members</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="groupMembersMeta" class="text-muted small mb-3"></div>
+                    <ul id="groupMembersInfoList" class="list-group list-group-flush">
+                        <!-- Populated dynamically -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GROUP MESSAGE SEEN LIST MODAL -->
+    <div class="modal fade" id="seenListModal" tabindex="-1" aria-labelledby="seenListModalLabel">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="seenListModalLabel">Seen By</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="seenUsersList" class="seen-users-list">
+                        <!-- Populated by JS: list of users who have seen the message -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PINNED MESSAGES MODAL -->
+    <div class="modal fade" id="pinnedMessagesModal" tabindex="-1" aria-labelledby="pinnedMessagesModalLabel">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="pinnedMessagesModalLabel">Pinned Messages</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="pinnedMessagesList" class="pinned-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEARCH MESSAGES MODAL -->
+    <div class="modal fade" id="searchMessagesModal" tabindex="-1" aria-labelledby="searchMessagesModalLabel">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="searchMessagesModalLabel">Search Messages</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form class="mb-3" id="searchMessagesForm">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="searchMessagesInput" placeholder="Search messages...">
+                            <button class="btn btn-primary" type="submit"><i class="fas fa-search"></i> Search</button>
+                        </div>
+                    </form>
+                    <div id="searchMessagesResults" class="search-results"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="shortcutsModal" tabindex="-1" aria-labelledby="shortcutsModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="shortcutsModalLabel">Keyboard Shortcuts</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                        <div class="col-12">
+                            <div class="shortcut-list p-3 rounded bg-light border">
+                                    <div class="col-6">
+                                        <h6>Navigation</h6>
+                                        <ul class="list-unstyled mb-3">
+                                            <li><kbd>Alt</kbd> + <kbd>↑</kbd> Previous chat</li>
+                                            <li><kbd>Alt</kbd> + <kbd>↓</kbd> Next chat</li>
+                                            <li><kbd>Alt</kbd> + <kbd>S</kbd> Search users</li>
+                                            <li><kbd>Esc</kbd> Clear search/Close modal</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-6">
+                                        <h6>Messaging</h6>
+                                        <ul class="list-unstyled mb-3">
+                                            <li><kbd>Enter</kbd> Send message</li>
+                                            <li><kbd>Alt</kbd> + <kbd>U</kbd> Upload image</li>
+                                            <li><kbd>Alt</kbd> + <kbd>E</kbd> Emoji picker</li>
+                                            <li><kbd>Alt</kbd> + <kbd>R</kbd> Reply to message</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="text-muted mt-3 small text-center">
+                                <i class="fas fa-info-circle"></i> Use keyboard shortcuts for faster navigation and messaging.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+    <div class="modal fade" id="replyModal" tabindex="-1" aria-labelledby="replyModalLabel">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="replyModalLabel">Reply to Message</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="reply-to-message"></div>
+                    <input type="text" class="form-control mt-3" id="reply-input" placeholder="Type your reply...">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="send-reply-btn" data-shortcut="Enter">Send Reply</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="forwardModal" tabindex="-1" aria-labelledby="forwardModalLabel">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="forwardModalLabel">Forward Message</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Message:</label>
+                        <div id="forward-message-preview" class="border rounded p-2 bg-light"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Select recipients:</label>
+                        <!-- Select All toggles for forward modal -->
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="selectAllForwardUsers">
+                                <label class="form-check-label" for="selectAllForwardUsers">Select All Users</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="selectAllForwardGroups">
+                                <label class="form-check-label" for="selectAllForwardGroups">Select All Groups</label>
+                            </div>
+                        </div>
+                        <div class="search-box mb-2">
+                            <input type="text" class="form-control" id="recipientSearch" placeholder="Search recipients...">
+                        </div>
+                        <div id="forward-users-list" class="forward-users-container"></div>
+                        <h6 class="fw-bold mb-2 mt-3">Groups</h6>
+                        <div id="forward-groups-list" class="mt-2"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="forward-btn" data-shortcut="Enter">Forward</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Update your image preview modal -->
+    <div class="modal fade" id="imagePreviewModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-fullscreen">
+            <div class="modal-content">
+                <div class="modal-body p-0 position-relative image-viewer-container">
+                    <div class="viewer-toolbar" aria-label="Image controls">
+                        <button id="zoomOutBtn" class="btn btn-outline-secondary btn-sm viewer-btn" title="Zoom out" aria-label="Zoom out"><i class="fas fa-search-minus"></i></button>
+                        <button id="zoomInBtn" class="btn btn-outline-secondary btn-sm viewer-btn" title="Zoom in" aria-label="Zoom in"><i class="fas fa-search-plus"></i></button>
+                        <button id="resetZoomBtn" class="btn btn-outline-secondary btn-sm viewer-btn" title="Reset" aria-label="Reset zoom"><i class="fas fa-compress-arrows-alt"></i></button>
+                        <div class="viewer-divider"></div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm viewer-btn" data-bs-dismiss="modal" title="Close" aria-label="Close"><i class="fas fa-times"></i></button>
+                    </div>
+
+                    <button id="prevImage" class="btn btn-primary viewer-nav start m-2" title="Previous image" aria-label="Previous image">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+
+                    <div class="image-stage">
+                        <img id="modalImage" src="" alt="Preview" />
+                    </div>
+
+                    <button id="nextImage" class="btn btn-primary viewer-nav end m-2" title="Next image" aria-label="Next image">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="errorToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header bg-danger text-white">
+                <i class="fas fa-exclamation-circle me-2"></i>
+                <strong class="me-auto">Error</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body"></div>
+        </div>
+    </div>
+
+    <div id="notificationBadge" class="notification-badge d-none">
+        <i class="fas fa-bell"></i>
+    </div>
+
+    <script>
+        window.CURRENT_USER = {
+            emp_id: "{{ current_user.emp_id }}",
+            name: "{{ current_user.name }}"
+        };
+    </script>
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/chat.js') }}?v=4"></script>
+</body>
+</html>
